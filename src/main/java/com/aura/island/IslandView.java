@@ -210,6 +210,7 @@ public class IslandView {
     private ImageView mNotifIcon;
     private TextView mNotifSender;
     private TextView mNotifContent;
+    private boolean mNotifDeltaPill;
     private View mHandle;
     private CameraMorphView mMorphView;
     private LinearLayout mTextCol;
@@ -724,7 +725,14 @@ public class IslandView {
                 return;
             }
             if (mMode == 4) {
-                if (mTransportCb != null) mTransportCb.onOpenNotification();
+                if (!mExpanded) {
+                    onTapped();
+                    mHandler.removeCallbacks(mAutoCollapse);
+                    mHandler.postDelayed(mAutoCollapse, 5000);
+                } else if (mTransportCb != null) {
+                    mHandler.removeCallbacks(mAutoCollapse);
+                    mTransportCb.onOpenNotification();
+                }
                 return;
             }
             if (mExpanded) {
@@ -746,8 +754,9 @@ public class IslandView {
         mHandle.setVisibility(View.GONE);
         mBg.setColor(BG);
         final LayoutParams cl = (LayoutParams) mCard.getLayoutParams();
-        final IslandGeometry.Box pose = mGeometry.collapsed(mMode == 2);
-        final IslandGeometry.Slots slots = mGeometry.slots(mMode == 2);
+        final boolean widePill = (mMode == 2) || (mMode == 4 && mNotifDeltaPill);
+        final IslandGeometry.Box pose = mGeometry.collapsed(widePill);
+        final IslandGeometry.Slots slots = mGeometry.slots(widePill);
         cl.width = pose.width;
         cl.height = pose.height;
         mCard.setPadding(0, 0, 0, 0);
@@ -763,13 +772,11 @@ public class IslandView {
         }
         mHeader.setVisibility(View.VISIBLE);
         final boolean media = mMode == 1;
+        final boolean hasLeftIcon = media || mMode == 3 || mMode == 4;
         mSub.setVisibility(View.GONE);
-        mThumbIcon.setVisibility(media || mMode == 3 ? View.VISIBLE : View.GONE);
-        // 无图兜底：左段中央显示歌名首字（叠在深色圆角块上）
+        mThumbIcon.setVisibility(hasLeftIcon ? View.VISIBLE : View.GONE);
         mTitle.setTranslationX(0);
-        if (mMode == 2 || mMode == 3) {
-            // 充电态：复位媒体兜底的大字号；translationX 直接右移（布局重力
-            // 在部分场景不生效，坐标偏移最可靠）
+        if (mMode == 2 || mMode == 3 || mMode == 4) {
             mTitle.setTextSize(12f);
             mTitle.setTextColor(Color.WHITE);
             mTitle.setTranslationX(0);
@@ -782,24 +789,21 @@ public class IslandView {
             mTitle.setTextSize(16f);
         }
         mThumbIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        // 边距 10→6dp：缩略图从约 40px 放大到约 56px
         final int iconPadding = dp(mMode == 3 ? 8 : 6);
         mThumbIcon.setPadding(iconPadding, iconPadding, iconPadding, iconPadding);
-        mThumbIcon.setTranslationX(mMode == 3 ? 0 : dp(3.5f)); // 收起态缩略图右移（在上一版基础上再 +1px）
+        mThumbIcon.setTranslationX((mMode == 3 || mMode == 4) ? 0 : dp(3.5f));
         final int segL = slots.left;
         mThumbIcon.setLayoutParams(new LinearLayout.LayoutParams(segL,
                 LinearLayout.LayoutParams.MATCH_PARENT));
-        mTextCol.setVisibility(media || mMode == 3 ? View.GONE : View.VISIBLE);
+        mTextCol.setVisibility(hasLeftIcon ? View.GONE : View.VISIBLE);
         mTextCol.setLayoutParams(new LinearLayout.LayoutParams(slots.left,
                 LinearLayout.LayoutParams.MATCH_PARENT));
-        // "充电中"右对齐贴住摄像头空档左缘（居中时收窄段宽位移太小）
         mTextCol.setGravity((mMode == 3 ? Gravity.CENTER_HORIZONTAL : Gravity.END)
                 | Gravity.CENTER_VERTICAL);
         mSpacer.setVisibility(View.VISIBLE);
         mSpacer.setLayoutParams(new LinearLayout.LayoutParams(slots.gap,
                 LinearLayout.LayoutParams.MATCH_PARENT));
         mEq.setVisibility(media ? View.VISIBLE : View.GONE);
-        // weight=1 占据空档右侧的全部剩余宽度，柱体在段内居中（修呼吸版改丢的右移）
         final LinearLayout.LayoutParams eqLp = new LinearLayout.LayoutParams(slots.right,
                 Math.min(dp(24), cl.height));
         eqLp.gravity = Gravity.CENTER;
@@ -1447,23 +1451,40 @@ public class IslandView {
     }
 
     public void showAppNotification(String pkg, String sender, String message,
-            android.graphics.drawable.Drawable appIcon) {
+            android.graphics.drawable.Drawable appIcon, String pillRightText, boolean isDeltaPill) {
         if (mAnimating && !mClosing) return;
-        final String fp = "4|" + pkg + "|" + sender + "|" + message;
+        final String fp = "4|" + pkg + "|" + sender + "|" + message + "|" + pillRightText + "|" + isDeltaPill;
         if (fp.equals(mLastFingerprint) && mShown && !mClosing) return;
         cancelClosing();
         build();
         final boolean wasHidden = !mShown;
+        final boolean modeChanged = mMode != 4;
+        final boolean deltaChanged = mNotifDeltaPill != isDeltaPill;
         mMode = 4;
         mPkg = pkg;
         mPlaying = false;
+        mNotifDeltaPill = isDeltaPill;
         mLastFingerprint = fp;
+
         mNotifSender.setText(sender);
         mNotifContent.setText(message);
+        mTitle.setText("");
+        mRightText.setText(pillRightText);
+        mRightText.setTextSize(isDeltaPill ? 11.5f : 13f);
         if (appIcon != null) {
+            final android.graphics.drawable.Drawable rounded = new RoundDrawable(appIcon, 0.25f);
             mNotifIcon.setImageDrawable(new RoundDrawable(appIcon, 0.22f));
+            mThumbIcon.setColorFilter(null);
+            mThumbIcon.setForeground(null);
+            mThumbIcon.setImageDrawable(rounded);
         }
-        applyExpandedParams();
+
+        if (!mExpanded || modeChanged || deltaChanged) {
+            if (mExpanded && modeChanged) {
+                mHandler.removeCallbacks(mAutoCollapse);
+            }
+            applyCollapsedParams();
+        }
         attach(wasHidden);
     }
 

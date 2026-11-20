@@ -44,19 +44,23 @@ public class IslandService extends Service {
     private long mSmsCodeUntilMs;
     private boolean mSmsReceiverRegistered;
 
-    private static final long NOTIF_SHOW_MS = 5_500;
+    private static final long NOTIF_DELTA_MS = 2_000;
     private String mNotifPkg;
     private String mNotifSender;
     private String mNotifText;
     private android.app.PendingIntent mNotifIntent;
-    private long mNotifUntilMs;
+    private int mNotifCount;
+    private int mNotifDelta;
+    private long mNotifDeltaUntilMs;
 
     private void clearAppNotif() {
         mNotifPkg = null;
         mNotifSender = null;
         mNotifText = null;
         mNotifIntent = null;
-        mNotifUntilMs = 0;
+        mNotifCount = 0;
+        mNotifDelta = 0;
+        mNotifDeltaUntilMs = 0;
     }
 
     private void openAppNotif() {
@@ -293,76 +297,135 @@ public class IslandService extends Service {
 
     @Override
     public void onCreate() {
-        super.onCreate();
-        publishHomeTarget("");
-        if (getSwitch("aura_island_on") == 0) {
-            stopSelf();
-            return;
-        }
-        startForegroundInternal();
-        // 异步 Handler：主线程队列若残留 sync barrier（同步屏障），普通消息会被
-        // 无限期挡住（表现为轮询/广播全停但绘制正常），异步消息不受影响。
-        mMain = Handler.createAsync(Looper.getMainLooper());
-        mEnabledObserver = new android.database.ContentObserver(mMain) {
-            @Override
-            public void onChange(boolean selfChange, android.net.Uri uri) {
-                if (uri != null && uri.equals(Settings.Global.getUriFor(IslandCameraConfig.SETTING))
-                        && mView != null) {
-                    mView.hide();
-                    mView = createIslandView();
-                    publishHomeTarget("");
-                }
-                if (getSwitch("aura_island_on") == 0) {
-                    stopSelf();
-                } else {
-                    updateSmsReceiver();
-        IslandNotificationListener.ensureEnabled(this);
-        try {
-            android.service.notification.NotificationListenerService.requestRebind(
-                    new android.content.ComponentName(this, IslandNotificationListener.class));
-        } catch (Throwable ignored) {}
-        IslandNotificationListener.setCallback(new IslandNotificationListener.Callback() {
-            @Override
-            public void onAppMessage(String pkg, String sender, String message,
-                    android.app.PendingIntent contentIntent) {
-                if (mDestroyed || mMain == null) return;
-                mMain.post(() -> {
-                    if (isMediaAppForeground(pkg)) return;
-                    mNotifPkg = pkg;
-                    mNotifSender = sender;
-                    mNotifText = message;
-                    mNotifIntent = contentIntent;
-                    mNotifUntilMs = android.os.SystemClock.elapsedRealtime() + NOTIF_SHOW_MS;
-                    refresh();
-                });
-            }
-
-            @Override
-            public void onAppMessageRemoved(String pkg) {
-                if (mDestroyed || mMain == null) return;
-                mMain.post(() -> {
-                    if (pkg != null && pkg.equals(mNotifPkg)) {
-                        clearAppNotif();
-                        refresh();
-                    }
-                });
-            }
-        });
-        updateBattery(null);
-        if (mMsm != null) {
-            try {
-                mMsm.addOnActiveSessionsChangedListener(mMsmListener, (ComponentName) null,
-                        android.os.Handler.createAsync(getMainLooper()));
-                attachSessionCallbacks(mMsm.getActiveSessions(null));
-            } catch (Throwable t) {
-                Log.w(TAG, "media listener failed", t);
-            }
-        }
-        refresh();
-        mMain.postDelayed(mPoll, POLL_MS);
+    super.onCreate();
+    publishHomeTarget("");
+    if (getSwitch("aura_island_on") == 0) {
+        stopSelf();
+        return;
     }
+    startForegroundInternal();
+    // 异步 Handler：主线程队列若残留 sync barrier（同步屏障），普通消息会被
+    // 无限期挡住（表现为轮询/广播全停但绘制正常），异步消息不受影响。
+    mMain = Handler.createAsync(Looper.getMainLooper());
+    mEnabledObserver = new android.database.ContentObserver(mMain) {
+        @Override
+        public void onChange(boolean selfChange, android.net.Uri uri) {
+            if (uri != null && uri.equals(Settings.Global.getUriFor(IslandCameraConfig.SETTING))
+                    && mView != null) {
+                mView.hide();
+                mView = createIslandView();
+                publishHomeTarget("");
+            }
+            if (getSwitch("aura_island_on") == 0) {
+                stopSelf();
+            } else {
+                updateSmsReceiver();
+                refresh();
+            }
+        }
+    };
+    getContentResolver().registerContentObserver(
+            android.provider.Settings.Global.getUriFor("aura_island_on"),
+            false, mEnabledObserver);
+    getContentResolver().registerContentObserver(
+            android.provider.Settings.Global.getUriFor("aura_island_sms"),
+            false, mEnabledObserver);
+    getContentResolver().registerContentObserver(
+            Settings.Global.getUriFor(IslandCameraConfig.SETTING), false, mEnabledObserver);
+    getContentResolver().registerContentObserver(
+            Settings.Global.getUriFor("aura_island_notif"), false, mEnabledObserver);
+    getContentResolver().registerContentObserver(
+            Settings.Global.getUriFor("aura_island_notif_apps"), false, mEnabledObserver);
+    mView = createIslandView();
+    try {
+        android.app.ActivityTaskManager.getService().registerTaskStackListener(mTaskListener);
+        mTaskListenerRegistered = true;
+    } catch (android.os.RemoteException | RuntimeException e) {
+        Log.w(TAG, "task listener registration failed", e);
+    }
+    mMsm = getSystemService(MediaSessionManager.class);
+    final IntentFilter f = new IntentFilter();
+    f.addAction(Intent.ACTION_BATTERY_CHANGED);
+    registerReceiver(mBatteryReceiver, f);
+    // 非系统广播必须显式声明导出标记（Android 14+），并用 STATUS_BAR_SERVICE
+    // 限定只有 SystemUI 这类持有者能发
+    try {
+        registerReceiver(mShadeReceiver, new IntentFilter(SHADE_ACTION),
+                "android.permission.STATUS_BAR_SERVICE", null,
+                Context.RECEIVER_EXPORTED);
+    } catch (Throwable t) {
+        Log.w(TAG, "shade receiver register failed", t);
+    }
+    updateSmsReceiver();
+    IslandNotificationListener.ensureEnabled(this);
+    try {
+        android.service.notification.NotificationListenerService.requestRebind(
+                new android.content.ComponentName(this, IslandNotificationListener.class));
+    } catch (Throwable ignored) {}
+    IslandNotificationListener.setCallback(new IslandNotificationListener.Callback() {
+        @Override
+        public void onAppMessage(String pkg, String sender, String message,
+                android.app.PendingIntent contentIntent, int count) {
+            if (mDestroyed || mMain == null) return;
+            mMain.post(() -> {
+                if (isMediaAppForeground(pkg)) return;
+                final long now = android.os.SystemClock.elapsedRealtime();
+                final int safeCount = Math.max(1, count);
+                if (pkg != null && pkg.equals(mNotifPkg) && mNotifCount > 0) {
+                    final int added = Math.max(1, safeCount - mNotifCount);
+                    if (now < mNotifDeltaUntilMs && mNotifDelta > 0) {
+                        mNotifDelta += added;
+                    } else {
+                        mNotifDelta = added;
+                    }
+                    mNotifDeltaUntilMs = now + NOTIF_DELTA_MS;
+                    mNotifCount = Math.max(safeCount, mNotifCount + added);
+                    mMain.postDelayed(() -> {
+                        if (!mDestroyed) refresh();
+                    }, NOTIF_DELTA_MS + 40);
+                } else {
+                    mNotifPkg = pkg;
+                    mNotifCount = safeCount;
+                    mNotifDelta = 0;
+                    mNotifDeltaUntilMs = 0;
+                }
+                mNotifSender = sender;
+                mNotifText = message;
+                mNotifIntent = contentIntent;
+                refresh();
+            });
+        }
 
-    private IslandView createIslandView() {
+        @Override
+        public void onAppMessageRemoved(String pkg, int remainingCount) {
+            if (mDestroyed || mMain == null) return;
+            mMain.post(() -> {
+                if (pkg != null && pkg.equals(mNotifPkg)) {
+                    if (remainingCount <= 0) {
+                        clearAppNotif();
+                    } else {
+                        mNotifCount = remainingCount;
+                    }
+                    refresh();
+                }
+            });
+        }
+    });
+    updateBattery(null);
+    if (mMsm != null) {
+        try {
+            mMsm.addOnActiveSessionsChangedListener(mMsmListener, (ComponentName) null,
+                    android.os.Handler.createAsync(getMainLooper()));
+            attachSessionCallbacks(mMsm.getActiveSessions(null));
+        } catch (Throwable t) {
+            Log.w(TAG, "media listener failed", t);
+        }
+    }
+    refresh();
+    mMain.postDelayed(mPoll, POLL_MS);
+}
+
+private IslandView createIslandView() {
         return new IslandView(this, new IslandView.TransportCallback() {
             @Override
             public void onPlayPause() {
@@ -980,15 +1043,22 @@ public class IslandService extends Service {
                 return;
             }
             if (mNotifPkg != null && (getSwitch("aura_island_notif") == 0
-                    || now >= mNotifUntilMs || isMediaAppForeground(mNotifPkg))) {
+                    || isMediaAppForeground(mNotifPkg))) {
                 clearAppNotif();
             }
             if (mNotifPkg != null) {
                 if (getSystemService(android.app.KeyguardManager.class).isKeyguardLocked()) {
                     mView.hideAnimated();
                 } else {
+                    final boolean showDelta = (mNotifDelta > 0 && now < mNotifDeltaUntilMs);
+                    if (!showDelta) {
+                        mNotifDelta = 0;
+                    }
+                    final String pillRight = showDelta
+                            ? ("消息 +" + mNotifDelta)
+                            : String.valueOf(Math.max(1, mNotifCount));
                     mView.showAppNotification(mNotifPkg, mNotifSender, mNotifText,
-                            loadIcon(mNotifPkg));
+                            loadIcon(mNotifPkg), pillRight, showDelta);
                 }
                 return;
             }

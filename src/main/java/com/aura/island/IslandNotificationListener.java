@@ -17,8 +17,9 @@ import java.util.Set;
 public class IslandNotificationListener extends NotificationListenerService {
 
     public interface Callback {
-        void onAppMessage(String pkg, String sender, String message, PendingIntent contentIntent);
-        void onAppMessageRemoved(String pkg);
+        void onAppMessage(String pkg, String sender, String message,
+                PendingIntent contentIntent, int count);
+        void onAppMessageRemoved(String pkg, int remainingCount);
     }
 
     private static volatile Callback sCallback;
@@ -100,18 +101,59 @@ public class IslandNotificationListener extends NotificationListenerService {
         }
         if (TextUtils.isEmpty(text)) text = "发来一条新消息";
 
+        int count = countPackageMessages(pkg, n);
         final Callback cb = sCallback;
-        android.util.Log.i("AuraIsland", "show island msg pkg=" + pkg + " title=" + title + " cb=" + (cb != null));
+        android.util.Log.i("AuraIsland", "show island msg pkg=" + pkg + " title=" + title
+                + " count=" + count + " cb=" + (cb != null));
         if (cb != null) {
-            cb.onAppMessage(pkg, title, text, n.contentIntent);
+            cb.onAppMessage(pkg, title, text, n.contentIntent, count);
         }
     }
 
     @Override
     public void onNotificationRemoved(StatusBarNotification sbn) {
         if (sbn != null && sCallback != null) {
-            sCallback.onAppMessageRemoved(sbn.getPackageName());
+            final String pkg = sbn.getPackageName();
+            final int rem = countPackageMessages(pkg, null);
+            sCallback.onAppMessageRemoved(pkg, rem);
         }
+    }
+
+    private int countPackageMessages(String pkg, Notification latest) {
+        int total = 0;
+        try {
+            final StatusBarNotification[] active = getActiveNotifications();
+            if (active != null) {
+                for (StatusBarNotification item : active) {
+                    if (item == null || item.isOngoing() || !pkg.equals(item.getPackageName())) {
+                        continue;
+                    }
+                    final Notification notif = item.getNotification();
+                    if (notif == null || (notif.flags & Notification.FLAG_GROUP_SUMMARY) != 0) {
+                        continue;
+                    }
+                    int itemCount = Math.max(1, notif.number);
+                    if (notif.isStyle(Notification.MessagingStyle.class) && notif.extras != null) {
+                        final Parcelable[] msgs = notif.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+                        if (msgs != null && msgs.length > itemCount) {
+                            itemCount = msgs.length;
+                        }
+                    }
+                    total += itemCount;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        if (latest != null && total == 0) {
+            total = Math.max(1, latest.number);
+            if (latest.isStyle(Notification.MessagingStyle.class) && latest.extras != null) {
+                final Parcelable[] msgs = latest.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+                if (msgs != null && msgs.length > total) {
+                    total = msgs.length;
+                }
+            }
+        }
+        return total;
     }
 
     private static String charSeq(CharSequence cs) {

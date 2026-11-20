@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Overlay these values per device. All dimensions are dp; Global calibration wins. -->
+    <bool name="island_camera_auto">true</bool>
+    <integer name="island_camera_x_percent">50</integer>
+    <integer name="island_camera_cutout_index">-1</integer>
+    <dimen name="island_camera_y">24dp</dimen>
+    <dimen name="island_camera_hole_width">18dp</dimen>
+    <dimen name="island_camera_hole_height">18dp</dimen>
+    <dimen name="island_camera_exclusion_height">48dp</dimen>
+    <dimen name="island_camera_gap">40dp</dimen>
+    <dimen name="island_capsule_offset_x">0dp</dimen>
+    <dimen name="island_capsule_offset_y">4dp</dimen>
+    <dimen name="island_capsule_height">44dp</dimen>
+    <dimen name="island_capsule_media_width">128dp</dimen>
+    <dimen name="island_capsule_charge_width">164dp</dimen>
+    <dimen name="island_expanded_gap">6dp</dimen>
+    <dimen name="island_expanded_width">328dp</dimen>
+    <dimen name="island_expanded_height">152dp</dimen>
+    <dimen name="island_screen_edge">4dp</dimen>
+    <string name="island_camera_title">摄像头与胶囊校准</string>
+    <string name="island_camera_auto_label">自动识别屏幕挖孔</string>
+    <string name="island_camera_help">关闭自动识别后使用手动位置；没有可用挖孔信息时也使用手动值。所有尺寸按 dp 计算。保存后已运行的灵动岛会更新；可在播放音乐时观察对齐。</string>
+    <string name="island_camera_apply">保存并应用</string>
+    <string name="island_camera_reset">恢复机型默认值</string>
+    <string name="island_camera_saved">校准参数已保存</string>
+    <string name="island_camera_invalid">请输入范围内的有效数字</string>
+</resources>

@@ -1,0 +1,20 @@
+//
+// SPDX-FileCopyrightText: Aura_A1 Project
+// SPDX-License-Identifier: Apache-2.0
+//
+
+android_app {
+    name: "AuraIsland",
+    srcs: ["src/main/java/**/*.java"],
+    resource_dirs: ["src/main/res"],
+    manifest: "src/main/AndroidManifest.xml",
+
+    platform_apis: true,
+    system_ext_specific: true,
+    privileged: true,
+    certificate: "platform",
+
+    optimize: {
+        enabled: false,
+    },
+}

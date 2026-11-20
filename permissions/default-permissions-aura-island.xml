@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<exceptions>
+    <!-- Incoming SMS only; no SMS history or sending permission. The feature has its own switch. -->
+    <exception package="com.aura.island">
+        <permission name="android.permission.RECEIVE_SMS" fixed="false" />
+    </exception>
+</exceptions>

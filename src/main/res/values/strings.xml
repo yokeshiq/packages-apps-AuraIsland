@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="island_app_name">灵动岛</string>
+    <string name="island_channel">灵动岛服务</string>
+    <string name="island_running">灵动岛运行中</string>
+    <string name="island_playing">正在播放</string>
+    <string name="island_charging">充电中</string>
+    <string name="island_charging_sub" />
+    <string name="island_open_failed">无法打开正在播放的应用</string>
+    <string name="island_sms_code">验证码</string>
+    <string name="island_sms_short">短信</string>
+    <string name="island_sms_copy">复制验证码</string>
+    <string name="island_sms_from">短信验证码 · %1$s</string>
+    <string name="island_sms_fill">填充</string>
+    <string name="island_sms_fill_unavailable">请先点选可编辑的输入框，也可使用复制按钮</string>
+</resources>
